@@ -1,70 +1,46 @@
 import pandas as pd
-import numpy as np
+import torch
 
-
-def load_data(filepath):
-
-    df=pd.read_csv(filepath)
-    df['y'] = (df['trump16'] > df['clinton16']).astype(float)
-    feature_cols = [
-            'white_pct', 'black_pct', 'hispanic_pct', 'foreignborn_pct',
-            'age65andolder_pct', 'median_hh_inc', 'clf_unemploy_pct', 
-            'lesscollege_pct', 'rural_pct'
-        ]
-    df = df.dropna(subset=feature_cols + ['y', 'fips']).copy()
-    
-    # Extract arrays
-    X = df[feature_cols].values
-    y = df['y'].values
-    fips = df['fips'].values # This is L_i, the location identifier
-    
-    # 3. Standardize features (Crucial for ADVI / optimization stability)
-    X_mean = np.mean(X, axis=0)
-    X_std = np.std(X, axis=0)
-    X_scaled = (X - X_mean) / (X_std + 1e-8)
-    
-    return X_scaled, y, fips, df
-
-def spatial_train_test_split(X, y, fips, train_ratio=0.8, seed=42):
+def load_and_preprocess_election_data(filepath):
     """
-    Splits the counties 80/20 for training and validation to test 
-    spatial interpolation as outlined in the proposal.
+    Loads the 1988 Gelman & Hill election polling dataset.
+    Extracts features, targets, and builds the nested state/region hierarchy.
     """
-    np.random.seed(seed)
-    n_locations = len(fips)
+    # Load the dataset
+    df = pd.read_csv(filepath)
     
-    # Randomly shuffle the indices to ensure a random spatial holdout
-    indices = np.random.permutation(n_locations)
+    # The standard columns for this specific hierarchical model
+    # We drop any rows with missing data in these specific columns
+    expected_cols = ['bush', 'state', 'region', 'age', 'edu', 'black', 'female']
+    df = df.dropna(subset=expected_cols).copy()
     
-    # Calculate the 80% split index
-    split_idx = int(n_locations * train_ratio)
+    # 1. Target Variable (y)
+    # 1 if they voted for Bush, 0 otherwise
+    y = torch.tensor(df['bush'].values, dtype=torch.float64)
     
-    train_idx = indices[:split_idx]
-    val_idx = indices[split_idx:]
+    # 2. Features (X)
+    feature_cols = ['age', 'edu', 'black', 'female']
+    X_raw = torch.tensor(df[feature_cols].values, dtype=torch.float64)
     
-    # Create the training set
-    X_train, y_train, fips_train = X[train_idx], y[train_idx], fips[train_idx]
+    # Standardize the features for stable gradients in ADVI
+    X_mean = X_raw.mean(dim=0)
+    X_std = X_raw.std(dim=0)
+    X = (X_raw - X_mean) / (X_std + 1e-8)
     
-    # Create the validation set
-    X_val, y_val, fips_val = X[val_idx], y[val_idx], fips[val_idx]
+    # 3. State Index (state_idx)
+    # The raw data usually has states as 1-51. We need 0-50 for PyTorch indexing.
+    # We map whatever unique IDs exist to a strict 0 to n_states-1 range.
+    df['state_code'] = df['state'].astype('category').cat.codes
+    state_idx = torch.tensor(df['state_code'].values, dtype=torch.long)
     
-    return (X_train, y_train, fips_train), (X_val, y_val, fips_val)
+    # 4. Region Index and state_to_region_idx mapping
+    # Regions are usually 1-5. We need 0-4.
+    df['region_code'] = df['region'].astype('category').cat.codes
+    
+    # We need an array where the index is the state_code, and the value is the region_code.
+    # This allows the prior to look up the correct regional mean for each state.
+    state_region_map = df.groupby('state_code')['region_code'].first().sort_index()
+    state_to_region_idx = torch.tensor(state_region_map.values, dtype=torch.long)
+    
+    return X, y, state_idx, state_to_region_idx
 
-if __name__ == "__main__":
-    # Example usage:
-    # Replace 'election_data.csv' with your actual file path
-    csv_path = r'data\raw\election-context-2018.csv' 
-    
-    
-    # Load and preprocess
-    X, y, fips, raw_df = load_data(csv_path)
-    print(f"Total counties loaded: {len(y)}")
-    
-    # Split the data
-    train_data, val_data = spatial_train_test_split(X, y, fips)
-    
-    X_train, y_train, fips_train = train_data
-    X_val, y_val, fips_val = val_data
-    
-    print(f"Training counties (80%): {len(y_train)}")
-    print(f"Validation counties (20%): {len(y_val)}")
