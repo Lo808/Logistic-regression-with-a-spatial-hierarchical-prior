@@ -3,6 +3,8 @@ import math
 
 def normal_log_prob(value, loc, scale):
     """Computes the log probability of a Normal distribution."""
+    loc = torch.as_tensor(loc, dtype=value.dtype, device=value.device)
+    scale = torch.as_tensor(scale, dtype=value.dtype, device=value.device)
     var = scale ** 2
     log_scale = torch.log(scale)
     return -0.5 * ((value - loc) ** 2 / var) - log_scale - 0.5 * math.log(2 * math.pi)

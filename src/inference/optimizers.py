@@ -4,15 +4,26 @@ class ADVIOptimizer:
     def __init__(self, n_features, n_states, n_regions, lr=0.1):
         # Initialize variational parameters (phi = {mu, log_sigma})
         # We require gradients for all of these to perform autograd
+        dtype = torch.float64
         
         self.vp = {
-            'beta': (torch.zeros(n_features, requires_grad=True), torch.zeros(n_features, requires_grad=True)),
-            'alpha': (torch.zeros(n_states, requires_grad=True), torch.zeros(n_states, requires_grad=True)),
-            'gamma': (torch.zeros(n_regions, requires_grad=True), torch.zeros(n_regions, requires_grad=True)),
-            # Variances for the hierarchy (1D scalars, but transformed via bijector later)
-            'sigma_state': (torch.zeros(1, requires_grad=True), torch.zeros(1, requires_grad=True)),
-            'sigma_region': (torch.zeros(1, requires_grad=True), torch.zeros(1, requires_grad=True)),
+            'beta': (torch.zeros(n_features, requires_grad=True, dtype=dtype), 
+                     torch.zeros(n_features, requires_grad=True, dtype=dtype)),
+            'alpha': (torch.zeros(n_states, requires_grad=True, dtype=dtype), 
+                      torch.zeros(n_states, requires_grad=True, dtype=dtype)),
+            'gamma': (torch.zeros(n_regions, requires_grad=True, dtype=dtype), 
+                      torch.zeros(n_regions, requires_grad=True, dtype=dtype)),
+            'sigma_state': (torch.zeros(1, requires_grad=True, dtype=dtype), 
+                            torch.zeros(1, requires_grad=True, dtype=dtype)),
+            'sigma_region': (torch.zeros(1, requires_grad=True, dtype=dtype), 
+                             torch.zeros(1, requires_grad=True, dtype=dtype)),
         }
+        
+        all_params = []
+        for mu, log_sigma in self.vp.values():
+            all_params.extend([mu, log_sigma])
+            
+        self.optimizer = torch.optim.Adam(all_params, lr=lr)
         
         # Collect all parameters into a single list for the PyTorch optimizer
         all_params = []
